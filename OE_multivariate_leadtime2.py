@@ -286,6 +286,17 @@ def data_resampling(df, df_shipment, current, link):
     :param df:
     :return:
     '''
+    def prep_for_tableau(df_sample,df_shipment):
+        ship,dif = df_shipment.rename(columns={'SNAP_DT':'Date'}).copy(),df_sample.copy()
+        ship[['Date']] = ship[['Date']].astype('Datetime64')
+        dif[['Date']] = dif[['Date']].astype('Datetime64')
+        df_combo = pd.concat([ship, dif]).fillna(0)[
+            ['Date', 'CUSTOMER', 'SHIP_QTY', 'forecast_high', 'forecast_low', 'forecast_mean']]
+        for col in ['forecast_high', 'forecast_low', 'forecast_mean']:
+            df_combo.loc[:, col] = df_combo.loc[:, [col, 'SHIP_QTY']].sum(axis=1)
+        df_combo.drop(columns='SHIP_QTY', inplace=True)
+        df_combo.to_excel(r'\\AKRTABLEAUPNA01\Americas_Market_Analytics$\COVID\daily__order_forecast.xlsx')
+
     #current_month = datetime.strftime(datetime.strptime(current, '%Y-%m-%d'), '%Y-%m')
     df.reset_index(inplace=True)
     df.to_excel('daily_forecast_{}.xlsx'.format(current))
@@ -301,6 +312,7 @@ def data_resampling(df, df_shipment, current, link):
         df.loc[index, 'forecast_high'] = np.where(round(np.percentile(samples, 80), 0) > 0,
                                                   round(np.percentile(samples, 80), 0), 0)
     df.drop(columns=['mean', 'std'], inplace=True)
+    prep_for_tableau(df, df_shipment)
     # now merge with current month shipment
     df = df.groupby('CUSTOMER')['forecast_low', 'forecast_mean', 'forecast_high'].sum()
     mtd_ship = df_shipment.copy()
@@ -325,8 +337,8 @@ if __name__ == '__main__':
     active_CUSTOMER = shipment.CUSTOMER.unique().tolist()
     orders = pd.read_pickle('historical_orders\historical_order_Rachael_filled_missing.pickle')
     type = 'parallel'
-    pca_dim = 5
-    scale_type = 'None' #'MinMax'
+    pca_dim = 0
+    scale_type = 'None'#'MinMax'
     # -----------------------
     exogenous_features = ['CON', 'IP', 'past_seven', 'past_twentyeight','yday_gain', 'past_two',
                           'final_week', 'final_week_ip', 'final_week_con',
@@ -342,6 +354,8 @@ if __name__ == '__main__':
     horizon = calendar.monthrange(datetime.strptime(test_date, "%Y-%m-%d").year,
                                   datetime.strptime(test_date, "%Y-%m-%d").month)[1] - \
               datetime.strptime(test_date, "%Y-%m-%d").day + 1
+    # temp horizon
+    horizon = np.int((pd.to_datetime('2020-04-30') - pd.to_datetime(test_date)) / np.timedelta64(1, 'D'))
     result = []
     import time
 

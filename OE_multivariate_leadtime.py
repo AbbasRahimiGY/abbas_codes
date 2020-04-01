@@ -676,13 +676,15 @@ if __name__ == '__main__':
     scale_list = ['y']
 
     max_terms = len(exogenous_features)
-    cutoff = datetime.strftime(datetime.today() - timedelta(days=2), "%Y-%m-%d")  # where to cutoff data
-    test = datetime.strftime(datetime.today() - timedelta(days=1),
+    cutoff = datetime.strftime(datetime.today() - timedelta(days=1), "%Y-%m-%d")  # where to cutoff data
+    test = datetime.strftime(datetime.today() - timedelta(days=0),
                              "%Y-%m-%d")  # where we sample from snap date for all horizons
     # find the horizon to search
     horizon = calendar.monthrange(datetime.strptime(test, "%Y-%m-%d").year,
                                     datetime.strptime(test, "%Y-%m-%d").month)[1] - \
                                     datetime.strptime(test, "%Y-%m-%d").day + 1
+    # temp horizon
+    horizon = np.int((pd.to_datetime('2020-04-30') - pd.to_datetime(test)) / np.timedelta64(1, 'D'))
     result = []
     for lead in range(1, horizon):
         lead_date = datetime.strftime(datetime.strptime(test, '%Y-%m-%d') + timedelta(lead), '%Y-%m-%d')
