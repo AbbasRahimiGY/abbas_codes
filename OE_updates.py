@@ -322,9 +322,6 @@ def prep_cat_level():  # old model
     custom_dict = {'Commuter / Touring': 0, 'All Terrain': 1, 'High Performance': 2,'Winter':3}
 
     part_a = part_a.iloc[part_a['CTGY'].map(custom_dict).argsort()].rename(columns={'CTGY': 'Category'})
-    real_columns = [col for col in part_a.columns if 'Category' not in col]
-    for col in real_columns:
-        part_a[col] = part_a[col].apply(lambda x: round_up(x))
     part_a.to_excel('OE_Update_CAT_{}.xlsx'.format(datetime.strftime(datetime.now(), '%Y-%m-%d')), index=False)
 
 
@@ -381,10 +378,6 @@ def prep_customer_level():
                        'Honda': 4, 'Toyota': 5, 'Nissan': 6}
 
     part_a = part_a.iloc[part_a['CUSTOMER'].map(custom_dict).argsort()]
-
-    real_columns = [col for col in part_a.columns if 'CUSTOMER' not in col]
-    for col in real_columns:
-        part_a[col] = part_a[col].apply(lambda x: round_up(x))
 
     part_a.to_excel('OE_Update_{}.xlsx'.format(datetime.strftime(datetime.now(), '%Y-%m-%d')), index=False)
 
@@ -533,6 +526,9 @@ def category_mail():
     vs_cols = [col for col in df.columns if 'VS' in col]
 
     df = pd.concat([df, pd.DataFrame(df.sum(axis=0), columns=['Grand Total']).T])
+    real_columns = [col for col in df.columns if 'Category' not in col]
+    for col in real_columns:
+        df[col] = df[col].apply(lambda x: round_up(x))
     df.Category[-1] = 'Grand Total'
     df.reset_index(inplace=True, drop=True)
 
@@ -607,8 +603,12 @@ def customer_mail():
     df = pd.read_excel(attachment)
     numeric_cols = [col for col in df.columns if df[col].dtype in ('int64', 'float64')]
     vs_cols = [col for col in df.columns if 'VS' in col]
-
+    # add sum to the end of table
     df = pd.concat([df, pd.DataFrame(df.sum(axis=0), columns=['Grand Total']).T])
+    # Round rows in thousand fraction
+    real_columns = [col for col in df.columns if 'CUSTOMER' not in col]
+    for col in real_columns:
+        df[col] = df[col].apply(lambda x: round_up(x))
     df.CUSTOMER[-1] = 'Grand Total'
     df.reset_index(inplace=True, drop=True)
 
@@ -655,7 +655,7 @@ def send_out_email():
     email_t4 = 'abbas_rahimi@goodyear.com;stacey_francesconi@goodyear.com;' \
                'nikki_viar@goodyear.com;dusty_smith@goodyear.com;patrick_handley@goodyear.com;' \
                'kenneth_carter@goodyear.com;josh_mottor@goodyear.com;blake_housel@goodyear.com;'
-    # email_t4 = 'abbas_rahimi@goodyear.com'
+    #email_t4 = 'abbas_rahimi@goodyear.com'
     mail.To = email_t4
 
     mail.Subject = 'OE Update as of {}'.format(datetime.strftime(datetime.now(), '%Y-%m-%d'))
