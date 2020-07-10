@@ -1,3 +1,4 @@
+import math
 import pandas as pd
 from datetime import datetime, timedelta
 import pyodbc
@@ -8,300 +9,92 @@ import win32com.client as win32
 
 warnings.filterwarnings('ignore')
 
-link = ('DSN=EDWTDPRD;UID=AA68383;PWD=baradarkhobvaghashang1364')
+link = ('DSN=EDWTDPRD;UID=AA68383;PWD=ilivein339westberry')
 pyodbc.pooling = False
 os.chdir(r'T:\Marketing\GBA-Share\BA Portal Files\OE_Forecast\OE_updates')
 
 
-def order_cat_query():
+def round_up(n):
+    if n > 0:
+        return math.floor(n / 1000 + 0.5)
+    else:
+        return math.floor(n / 1000 + 0.5)
+
+
+def order_total_query():
     query = '''SELECT
-                 
+
                   CAST(COALESCE(O1.SNAP_DT, D1.SNAP_DT) AS DATE) AS SNAP_DT,
-                 -- C.CUST_GRP_NAME AS CUSTOMER,
+                  C.CUST_GRP_NAME AS CUSTOMER,
                   M.MKT_CTGY_MKT_AREA_NAME AS CTGY,
-                 
-                  SUM(ZEROIFNULL(O1.BPI_COMMIT)) AS PRI_AND_CURR_MTH_COMMIT_QTY,
-                 
-                 SUM(             ZEROIFNULL(D1.PRI_AND_CURR_MTH_INPROC_QTY)        ) AS PRI_AND_CURR_MTH_IN_PROC_QTY,
-                  PRI_AND_CURR_MTH_COMMIT_QTY+PRI_AND_CURR_MTH_IN_PROC_QTY AS WORKING,
-                  SUM(D1.DELIV_QTY) AS SHIP_QTY,
-                  SHIP_QTY +WORKING AS shipped_plus_working
-               
-            FROM
-                          (
-                                         SELECT 
-                                                       O.SHIP_TO_CUST_ID,
-                                                       O.SNAP_DT,
-                                                     --  O.PLN_DELIV_DT,
-                                                       O.MATL_ID,
-                                                       --O.DELIV_BLK_CD,
-                                                       SUM(O.RPT_ORDER_QTY) AS ORD_QTY,
-                                                       SUM(O.RPT_CNFRM_QTY) AS CONFIRM_QTY,
-                                                       SUM(
-                                                       CASE
-                                                                                    -- WHEN O.PLN_GOODS_ISS_DT < ADD_MONTHS((CURRENT_DATE -1) - EXTRACT(DAY FROM CURRENT_DATE -1) + 1, 1)
-                                                                      WHEN O.PLN_GOODS_ISS_DT < ADD_MONTHS(TRUNC(O.SNAP_DT, 'MM') , 1) 
-                                                                                    THEN O.OPEN_CNFRM_QTY
-                                                                      ELSE 0
-                                                       END) AS BPI_COMMIT,
-                                                       SUM(O.OPEN_CNFRM_QTY) AS OPEN_CONFIRM_QTY
-                                         FROM
-                                                       NA_BI_VWS.ORDER_SCHD_AGR_DETAIL_SNAP O
-                                         WHERE
-                                                       O.OPEN_ORDER_IND = 'Y'
-                                                       AND O.PO_TYPE_ID <>'RO'
-                                                       AND O.SNAP_DT BETWEEN DATE-2 AND DATE-1 
-                                                   
-                                                       --  AND  TRUNC(O.SNAP_DT,'MM') =TRUNC(O.PLN_DELIV_DT,'mm')
-                                         GROUP BY 
-                                                       O.SHIP_TO_CUST_ID,
-                                                       O.SNAP_DT,
-                                                     
-                                                       O.MATL_ID
-                                                       --   O.DELIV_BLK_CD
-                          )
-                          O1
-                          FULL OUTER JOIN
-                                         (
-                                                       SELECT
-                                                                      D.SHIP_TO_CUST_ID,
-                                                                      D.MATL_ID,
-                                                                      D.SNAP_DT,
-                                                                      --   ''AS DELIV_BLK_CD,
-                                                                     -- D.PLN_GOODS_MVT_DT AS PLN_DELIV_DT,
-                                                                      SUM(CASE WHEN D.ACTL_GOODS_ISS_DT IS NOT NULL THEN D.RPT_DELIV_QTY ELSE 0 END) AS DELIV_QTY,
-                                                                        SUM(
-                                                                            CASE
-                                                                                WHEN TRUNC(D.PLN_GOODS_MVT_DT, 'MM') <= TRUNC(D.SNAP_DT, 'MM')
-                                                                                        AND D.ACTL_GOODS_ISS_DT IS NULL
-                                                                                    THEN ZEROIFNULL(D.DELIV_QTY)
-                                                                                 ELSE 0 
-                                                                        END) AS PRI_AND_CURR_MTH_INPROC_QTY
-                                                       FROM
-                                                                      NA_BI_VWS.DELIVERY_SNAP D
-                                                       WHERE
-                                                                      D.SNAP_DT BETWEEN DATE-2 AND DATE-1
-                                                                      AND TRUNC(COALESCE(D.ACTL_GOODS_ISS_DT, CURRENT_DATE-1) ,'MM') = TRUNC(CURRENT_DATE-1,'MM')
-                                                                     -- AND D.GOODS_ISS_IND = 'N'
-                                                       GROUP BY
-                                                                      D.SHIP_TO_CUST_ID,
-                                                                      D.MATL_ID,
-                                                                      D.SNAP_DT
-                                                                     
-                                         )
-                                         D1
-                          ON
-                                         O1.SNAP_DT = D1.SNAP_DT
-                                         AND O1.SHIP_TO_CUST_ID = D1.SHIP_TO_CUST_ID
-                                         AND O1.MATL_ID = D1.MATL_ID
-                  
-                          INNER JOIN NA_BI_VWS.CUSTOMER C
-                          ON
-                                         C.SHIP_TO_CUST_ID = COALESCE(O1.SHIP_TO_CUST_ID, D1.SHIP_TO_CUST_ID)
-                          INNER JOIN NA_BI_VWS.MATERIAL M
-                          ON
-                                         M.MATL_ID = COALESCE(O1.MATL_ID, D1.MATL_ID)
-            WHERE
-                          -- M.PBU_NBR = '03'
-                          --AND M.MKT_AREA_NBR ='05'
-                          M.PBU_NBR = '01'
-                          AND M.SUPER_BRAND_ID IN('01', '02', '03')
-                          AND(C.SALES_ORG_CD IN('N302', 'N312'))
-            GROUP BY
-                          1,
-                          2
-            ORDER BY
-                          1,
-                          2;
-                 '''
-
-    with pyodbc.connect(link, autocommit=True) as connect:
-        df = pd.read_sql(query, connect)
-    return df  # old model #
-
-
-def order_query_update():
-    query = '''SELECT
-                 
-                  CAST(COALESCE(O1.SNAP_DT, D1.SNAP_DT) AS DATE) AS SNAP_DT,
-                  C.CUST_GRP_NAME AS CUSTOMER,
-                 
-                  SUM(ZEROIFNULL(O1.BPI_COMMIT)) AS PRI_AND_CURR_MTH_COMMIT_QTY,
-                 
-                 SUM(             ZEROIFNULL(D1.PRI_AND_CURR_MTH_INPROC_QTY)        ) AS PRI_AND_CURR_MTH_IN_PROC_QTY,
-                  PRI_AND_CURR_MTH_COMMIT_QTY+PRI_AND_CURR_MTH_IN_PROC_QTY AS WORKING,
-                  SUM(D1.DELIV_QTY) AS SHIP_QTY,
-                  SHIP_QTY +WORKING AS shipped_plus_working
-               
-            FROM
-                          (
-                                         SELECT 
-                                                       O.SHIP_TO_CUST_ID,
-                                                       O.SNAP_DT,
-                                                     --  O.PLN_DELIV_DT,
-                                                       O.MATL_ID,
-                                                       --O.DELIV_BLK_CD,
-                                                       SUM(O.RPT_ORDER_QTY) AS ORD_QTY,
-                                                       SUM(O.RPT_CNFRM_QTY) AS CONFIRM_QTY,
-                                                       SUM(
-                                                       CASE
-                                                                                    -- WHEN O.PLN_GOODS_ISS_DT < ADD_MONTHS((CURRENT_DATE -1) - EXTRACT(DAY FROM CURRENT_DATE -1) + 1, 1)
-                                                                      WHEN O.PLN_GOODS_ISS_DT < ADD_MONTHS(TRUNC(O.SNAP_DT, 'MM') , 1) 
-                                                                                    THEN O.OPEN_CNFRM_QTY
-                                                                      ELSE 0
-                                                       END) AS BPI_COMMIT,
-                                                       SUM(O.OPEN_CNFRM_QTY) AS OPEN_CONFIRM_QTY
-                                         FROM
-                                                       NA_BI_VWS.ORDER_SCHD_AGR_DETAIL_SNAP O
-                                         WHERE
-                                                       O.OPEN_ORDER_IND = 'Y'
-                                                       AND O.PO_TYPE_ID <>'RO'
-                                                       AND O.SNAP_DT BETWEEN DATE-2 AND DATE-1 
-                                                   
-                                                       --  AND  TRUNC(O.SNAP_DT,'MM') =TRUNC(O.PLN_DELIV_DT,'mm')
-                                         GROUP BY 
-                                                       O.SHIP_TO_CUST_ID,
-                                                       O.SNAP_DT,
-                                                     
-                                                       O.MATL_ID
-                                                       --   O.DELIV_BLK_CD
-                          )
-                          O1
-                          FULL OUTER JOIN
-                                         (
-                                                       SELECT
-                                                                      D.SHIP_TO_CUST_ID,
-                                                                      D.MATL_ID,
-                                                                      D.SNAP_DT,
-                                                                      --   ''AS DELIV_BLK_CD,
-                                                                     -- D.PLN_GOODS_MVT_DT AS PLN_DELIV_DT,
-                                                                      SUM(CASE WHEN D.ACTL_GOODS_ISS_DT IS NOT NULL THEN D.RPT_DELIV_QTY ELSE 0 END) AS DELIV_QTY,
-                                                                        SUM(
-                                                                            CASE
-                                                                                WHEN TRUNC(D.PLN_GOODS_MVT_DT, 'MM') <= TRUNC(D.SNAP_DT, 'MM')
-                                                                                        AND D.ACTL_GOODS_ISS_DT IS NULL
-                                                                                    THEN ZEROIFNULL(D.DELIV_QTY)
-                                                                                 ELSE 0 
-                                                                        END) AS PRI_AND_CURR_MTH_INPROC_QTY
-                                                       FROM
-                                                                      NA_BI_VWS.DELIVERY_SNAP D
-                                                       WHERE
-                                                                      D.SNAP_DT BETWEEN DATE-2 AND DATE-1
-                                                                      AND TRUNC(COALESCE(D.ACTL_GOODS_ISS_DT, CURRENT_DATE-1) ,'MM') = TRUNC(CURRENT_DATE-1,'MM')
-                                                                     -- AND D.GOODS_ISS_IND = 'N'
-                                                       GROUP BY
-                                                                      D.SHIP_TO_CUST_ID,
-                                                                      D.MATL_ID,
-                                                                      D.SNAP_DT
-                                                                     
-                                         )
-                                         D1
-                          ON
-                                         O1.SNAP_DT = D1.SNAP_DT
-                                         AND O1.SHIP_TO_CUST_ID = D1.SHIP_TO_CUST_ID
-                                         AND O1.MATL_ID = D1.MATL_ID
-                  
-                          INNER JOIN NA_BI_VWS.CUSTOMER C
-                          ON
-                                         C.SHIP_TO_CUST_ID = COALESCE(O1.SHIP_TO_CUST_ID, D1.SHIP_TO_CUST_ID)
-                          INNER JOIN NA_BI_VWS.MATERIAL M
-                          ON
-                                         M.MATL_ID = COALESCE(O1.MATL_ID, D1.MATL_ID)
-            WHERE
-                          -- M.PBU_NBR = '03'
-                          --AND M.MKT_AREA_NBR ='05'
-                          M.PBU_NBR = '01'
-                          AND M.SUPER_BRAND_ID IN('01', '02', '03')
-                          AND(C.SALES_ORG_CD IN('N302', 'N312'))
-            GROUP BY
-                          1,
-                          2
-            ORDER BY
-                          1,
-                          2;
-                 '''
-
-    with pyodbc.connect(link, autocommit=True) as connect:
-        df = pd.read_sql(query, connect)
-    return df
-
-
-def order_line_query():
-    query = '''SELECT
-
-                  CAST(COALESCE(O1.SNAP_DT, D1.SNAP_DT) AS DATE) AS SNAP_DT,
-                  C.CUST_GRP_NAME AS CUSTOMER,
                   M.MKT_CTGY_PROD_LINE_NAME AS LINE,
 
                   SUM(ZEROIFNULL(O1.BPI_COMMIT)) AS PRI_AND_CURR_MTH_COMMIT_QTY,
-
-                 SUM(  ZEROIFNULL(D1.PRI_AND_CURR_MTH_INPROC_QTY)        ) AS PRI_AND_CURR_MTH_IN_PROC_QTY,
-                  Zeroifnull(PRI_AND_CURR_MTH_COMMIT_QTY)+ zeroifnull(PRI_AND_CURR_MTH_IN_PROC_QTY) AS WORKING,
-                  SUM(zeroifnull(D1.DELIV_QTY)) AS SHIP_QTY,
+                  SUM(             ZEROIFNULL(D1.PRI_AND_CURR_MTH_INPROC_QTY)        ) AS PRI_AND_CURR_MTH_IN_PROC_QTY,
+                  PRI_AND_CURR_MTH_COMMIT_QTY+PRI_AND_CURR_MTH_IN_PROC_QTY AS WORKING,
+                  SUM(D1.DELIV_QTY) AS SHIP_QTY,
                   SHIP_QTY +WORKING AS shipped_plus_working
-
 
             FROM
                           (
-                                         SELECT 
-                                                       O.SHIP_TO_CUST_ID,
-                                                       O.SNAP_DT,
-                                                     --  O.PLN_DELIV_DT,
-                                                       O.MATL_ID,
-                                                       --O.DELIV_BLK_CD,
-                                                       SUM(O.RPT_ORDER_QTY) AS ORD_QTY,
-                                                       SUM(O.RPT_CNFRM_QTY) AS CONFIRM_QTY,
-                                                       SUM(
-                                                       CASE
-                                                                                    -- WHEN O.PLN_GOODS_ISS_DT < ADD_MONTHS((CURRENT_DATE -1) - EXTRACT(DAY FROM CURRENT_DATE -1) + 1, 1)
-                                                                      WHEN O.PLN_GOODS_ISS_DT < ADD_MONTHS(TRUNC(O.SNAP_DT, 'MM') , 1) 
-                                                                                    THEN O.OPEN_CNFRM_QTY
-                                                                      ELSE 0
-                                                       END) AS BPI_COMMIT,
-                                                       SUM(O.OPEN_CNFRM_QTY) AS OPEN_CONFIRM_QTY
-                                         FROM
-                                                       NA_BI_VWS.ORDER_SCHD_AGR_DETAIL_SNAP O
-                                         WHERE
-                                                       O.OPEN_ORDER_IND = 'Y'
-                                                       AND O.PO_TYPE_ID <>'RO'
-                                                       AND O.SNAP_DT BETWEEN DATE-2 AND DATE-1 
+                             SELECT 
+                                           O.SHIP_TO_CUST_ID,
+                                           O.SNAP_DT,
+                                         --  O.PLN_DELIV_DT,
+                                           O.MATL_ID,
+                                           --O.DELIV_BLK_CD,
+                                           SUM(O.RPT_ORDER_QTY) AS ORD_QTY,
+                                           SUM(O.RPT_CNFRM_QTY) AS CONFIRM_QTY,
+                                           SUM(
+                                           CASE
+                                                  -- WHEN O.PLN_GOODS_ISS_DT < ADD_MONTHS((CURRENT_DATE -1) - EXTRACT(DAY FROM CURRENT_DATE -1) + 1, 1)
+                                                  WHEN O.PLN_GOODS_ISS_DT < ADD_MONTHS(TRUNC(O.SNAP_DT, 'MM') , 1) 
+                                                  THEN O.OPEN_CNFRM_QTY
+                                                  ELSE 0
+                                           END) AS BPI_COMMIT,
+                                           SUM(O.OPEN_CNFRM_QTY) AS OPEN_CONFIRM_QTY
+                             FROM
+                                           NA_BI_VWS.ORDER_SCHD_AGR_DETAIL_SNAP O
+                             WHERE
+                                           O.OPEN_ORDER_IND = 'Y'
+                                           AND O.PO_TYPE_ID <>'RO'
+                                           AND O.SNAP_DT BETWEEN DATE-2 AND DATE-1 
 
-                                                       --  AND  TRUNC(O.SNAP_DT,'MM') =TRUNC(O.PLN_DELIV_DT,'mm')
-                                         GROUP BY 
-                                                       O.SHIP_TO_CUST_ID,
-                                                       O.SNAP_DT,
+                                           --  AND  TRUNC(O.SNAP_DT,'MM') =TRUNC(O.PLN_DELIV_DT,'mm')
+                             GROUP BY 
+                                           O.SHIP_TO_CUST_ID,
+                                           O.SNAP_DT,
 
-                                                       O.MATL_ID
-                                                       --   O.DELIV_BLK_CD
+                                           O.MATL_ID
+                                           --   O.DELIV_BLK_CD
                           )
                           O1
                           FULL OUTER JOIN
                                          (
-                                                       SELECT
-                                                                      D.SHIP_TO_CUST_ID,
-                                                                      D.MATL_ID,
-                                                                      D.SNAP_DT,
-                                                                      --   ''AS DELIV_BLK_CD,
-                                                                     -- D.PLN_GOODS_MVT_DT AS PLN_DELIV_DT,
-                                                                      SUM(CASE WHEN D.ACTL_GOODS_ISS_DT IS NOT NULL THEN D.RPT_DELIV_QTY ELSE 0 END) AS DELIV_QTY,
-                                                                        SUM(
-                                                                            CASE
-                                                                                WHEN TRUNC(D.PLN_GOODS_MVT_DT, 'MM') <= TRUNC(D.SNAP_DT, 'MM')
-                                                                                        AND D.ACTL_GOODS_ISS_DT IS NULL
-                                                                                    THEN ZEROIFNULL(D.DELIV_QTY)
-                                                                                 ELSE 0 
-                                                                        END) AS PRI_AND_CURR_MTH_INPROC_QTY
-                                                       FROM
-                                                                      NA_BI_VWS.DELIVERY_SNAP D
-                                                       WHERE
-                                                                      D.SNAP_DT BETWEEN DATE-2 AND DATE-1
-                                                                      AND TRUNC(COALESCE(D.ACTL_GOODS_ISS_DT, CURRENT_DATE-1) ,'MM') = TRUNC(CURRENT_DATE-1,'MM')
-                                                                     -- AND D.GOODS_ISS_IND = 'N'
-                                                       GROUP BY
-                                                                      D.SHIP_TO_CUST_ID,
-                                                                      D.MATL_ID,
-                                                                      D.SNAP_DT
-
+                                           SELECT
+                                                          D.SHIP_TO_CUST_ID,
+                                                          D.MATL_ID,
+                                                          D.SNAP_DT,
+                                                          --   ''AS DELIV_BLK_CD,
+                                                         -- D.PLN_GOODS_MVT_DT AS PLN_DELIV_DT,
+                                                          SUM(CASE WHEN D.ACTL_GOODS_ISS_DT IS NOT NULL THEN D.RPT_DELIV_QTY ELSE 0 END) AS DELIV_QTY,
+                                                            SUM(
+                                                                CASE
+                                                                    WHEN TRUNC(D.PLN_GOODS_MVT_DT, 'MM') <= TRUNC(D.SNAP_DT, 'MM')
+                                                                            AND D.ACTL_GOODS_ISS_DT IS NULL
+                                                                        THEN ZEROIFNULL(D.DELIV_QTY)
+                                                                     ELSE 0 
+                                                            END) AS PRI_AND_CURR_MTH_INPROC_QTY
+                                           FROM
+                                                          NA_BI_VWS.DELIVERY_SNAP D
+                                           WHERE
+                                                          D.SNAP_DT BETWEEN DATE-2 AND DATE-1
+                                                          AND TRUNC(COALESCE(D.ACTL_GOODS_ISS_DT, CURRENT_DATE-1) ,'MM') = TRUNC(CURRENT_DATE-1,'MM')
+                                                         -- AND D.GOODS_ISS_IND = 'N'
+                                           GROUP BY
+                                                          D.SHIP_TO_CUST_ID,
+                                                          D.MATL_ID,
+                                                          D.SNAP_DT                                                                    
                                          )
                                          D1
                           ON
@@ -323,10 +116,10 @@ def order_line_query():
                           AND(C.SALES_ORG_CD IN('N302', 'N312'))
             GROUP BY
                           1,
-                          2,3
+                          2,3,4
             ORDER BY
                           1,
-                          2,3;
+                          2,3,4;
                  '''
 
     with pyodbc.connect(link, autocommit=True) as connect:
@@ -416,7 +209,7 @@ def plan_query():
                        SP.EST_TYP_IND ='C'
                        AND SP.PERD_BEGIN_MTH_DT BETWEEN '2020-01-01' AND '2020-12-01'
                        AND M.PBU_NBR = '01'
-                      -- AND SP.SALES_ORG_CD IN('N302', 'N312')
+                      -- AND SP.SALES_ORG_CD IN('N302','N303', 'N312')
                        AND SP.DATA_SRC_CD = 'CUST_SLS_PLN_MTH'
                        AND CG.CUST_HIER_GRP_2_DESC ='oe'
                 GROUP BY
@@ -468,7 +261,7 @@ def plan_cat_query():
                        SP.EST_TYP_IND ='C'
                        AND SP.PERD_BEGIN_MTH_DT BETWEEN '2020-01-01' AND '2020-12-01'
                        AND M.PBU_NBR = '01'
-                      -- AND SP.SALES_ORG_CD IN('N302', 'N312')
+                      -- AND SP.SALES_ORG_CD IN('N302','N303', 'N312')
                        AND SP.DATA_SRC_CD = 'CUST_SLS_PLN_MTH'
                        AND CG.CUST_HIER_GRP_2_DESC ='oe'
                 GROUP BY
@@ -492,10 +285,13 @@ def plan_cat_query():
     return df
 
 
-# prep data at different aggregation
 def prep_cat_level():  # old model
-    order = order_cat_query()
+    #order = order_cat_query()
     plan_CT = plan_cat_query()
+    order = order_total_query()  # order_query()
+    order = order.groupby(['SNAP_DT', 'CTGY'], as_index=False)['PRI_AND_CURR_MTH_COMMIT_QTY',
+                                                                     'PRI_AND_CURR_MTH_IN_PROC_QTY', 'WORKING', 'SHIP_QTY',
+                                                                     'shipped_plus_working'].sum()
     df = order.copy()
     lastday = datetime.strftime(datetime.now() - timedelta(days=1), '%Y-%m-%d')
     twodaysago = datetime.strftime(datetime.now() - timedelta(days=2), '%Y-%m-%d')
@@ -510,29 +306,35 @@ def prep_cat_level():  # old model
         part_a.loc[:, 'VS_Prior_Day'] = (part_a['shipped_plus_working'].values -
                                          part_b['shipped_plus_working'].values).astype('int64')
         part_a = part_a.merge(plan_CT[['SOP_QTY', 'CTGY']], left_on='CTGY',
-                              right_on='CTGY', how='right').rename(columns={'SOP_QTY': name_sop})
+                              right_on='CTGY', how='left').rename(columns={'SOP_QTY': name_sop})
         part_a.fillna(value=0, inplace=True)
         part_a[f'VS {name_sop}'] = (part_a['shipped_plus_working'] - part_a[name_sop]).astype('int64')
         part_a = part_a[['CTGY', name_sop, 'shipped_plus_working', f'VS {name_sop}', 'VS_Prior_Day']]
 
     else:
         part_a = part_a.merge(plan_CT[['SOP_QTY', 'CTGY']], left_on='CTGY',
-                              right_on='CTGY', how='right').rename(columns={'SOP_QTY': name_sop})
+                              right_on='CTGY', how='left').rename(columns={'SOP_QTY': name_sop})
         part_a.fillna(value=0, inplace=True)
         part_a[f'VS {name_sop}'] = part_a['shipped_plus_working'] - part_a[name_sop]
         part_a = part_a[['CTGY', name_sop, 'shipped_plus_working', f'VS {name_sop}']]
 
     part_a = part_a.sort_values(by='shipped_plus_working', ascending=False)
-    custom_dict = {'Commuter / Touring': 0, 'All Terrain': 1, 'High Performance': 2}
+    custom_dict = {'Commuter / Touring': 0, 'All Terrain': 1, 'High Performance': 2,'Winter':3}
 
     part_a = part_a.iloc[part_a['CTGY'].map(custom_dict).argsort()].rename(columns={'CTGY': 'Category'})
+    real_columns = [col for col in part_a.columns if 'Category' not in col]
+    for col in real_columns:
+        part_a[col] = part_a[col].apply(lambda x: round_up(x))
     part_a.to_excel('OE_Update_CAT_{}.xlsx'.format(datetime.strftime(datetime.now(), '%Y-%m-%d')), index=False)
 
 
 def prep_customer_level():
     plan = plan_query()
     # shipment = shipment_query()
-    orders = order_query_update()  # order_query()
+    orders = order_total_query()  # order_query()
+    orders = orders.groupby(['SNAP_DT', 'CUSTOMER'], as_index=False)['PRI_AND_CURR_MTH_COMMIT_QTY',
+                                                            'PRI_AND_CURR_MTH_IN_PROC_QTY', 'WORKING', 'SHIP_QTY',
+                                                            'shipped_plus_working'].sum()
     df = orders.copy()
     lastday = datetime.strftime(datetime.now() - timedelta(days=1), '%Y-%m-%d')
     twodaysago = datetime.strftime(datetime.now() - timedelta(days=2), '%Y-%m-%d')
@@ -544,9 +346,10 @@ def prep_customer_level():
     df = df.groupby(['SNAP_DT', 'CUSTOMER'], as_index=False).sum()
     df.index = pd.to_datetime(df['SNAP_DT'])
     # combine other companies for plan
+    plan.loc[plan.CUSTOMER == 'Chrysler', 'CUSTOMER'] = 'FCA'
+    others = [customer for customer in plan.CUSTOMER.unique() if customer not in main]
     plan.loc[plan.CUSTOMER.isin(others), 'CUSTOMER'] = 'Other'
     plan = plan.groupby(['DATE', 'CUSTOMER', 'FORC_TYP_DESC'], as_index=False).sum()
-    plan.loc[plan.CUSTOMER == 'Chrysler', 'CUSTOMER'] = 'FCA'
 
     part_a = df[df.index == lastday]
     part_b = df[df.index == twodaysago]
@@ -566,7 +369,7 @@ def prep_customer_level():
         part_a = part_a.merge(plan[['SOP_QTY', 'CUSTOMER']], left_on='CUSTOMER',
                               right_on='CUSTOMER', how='right').rename(columns={'SOP_QTY': name_sop})
         part_a.fillna(value=0, inplace=True)
-        part_a[f'VS {name_sop}'] = part_a['shipped_plus_working'] - part_a[name_sop]
+        part_a[f'VS {name_sop}'] = (part_a['shipped_plus_working'] - part_a[name_sop]).astype('int64')
         part_a = part_a[['CUSTOMER', name_sop, 'shipped_plus_working', f'VS {name_sop}']]
 
     part_a = part_a.sort_values(by='shipped_plus_working', ascending=False)
@@ -579,19 +382,18 @@ def prep_customer_level():
 
     part_a = part_a.iloc[part_a['CUSTOMER'].map(custom_dict).argsort()]
 
-    ''' real_columns = [col for col in part_a.columns if 'CUSTOMER' not in col]
-    for i in real_columns:
-        if i in ([f'VS {name_sop}', 'VS_Prior_Day']):
-            part_a[i] = part_a[i].apply(
-                lambda x: np.ceil(x / 1000) if (x / 1000) > 0 else np.floor(x / 1000))
-        else:
-            part_a[i] = part_a[i].apply(lambda x: np.round(x / 1000,0))
-     '''
+    real_columns = [col for col in part_a.columns if 'CUSTOMER' not in col]
+    for col in real_columns:
+        part_a[col] = part_a[col].apply(lambda x: round_up(x))
+
     part_a.to_excel('OE_Update_{}.xlsx'.format(datetime.strftime(datetime.now(), '%Y-%m-%d')), index=False)
 
 
 def prep_line_level():
-    order = order_line_query()
+    order = order_total_query()  # order_query()
+    order = order.groupby(['SNAP_DT', 'CUSTOMER', 'LINE'], as_index=False)['PRI_AND_CURR_MTH_COMMIT_QTY',
+                                                               'PRI_AND_CURR_MTH_IN_PROC_QTY', 'WORKING', 'SHIP_QTY',
+                                                               'shipped_plus_working'].sum()
     plan_CT = plan_line_query()
     df = order.copy()
     lastday = datetime.strftime(datetime.now() - timedelta(days=1), '%Y-%m-%d')
@@ -623,12 +425,14 @@ def prep_line_level():
                               right_on=['CUSTOMER', 'LINE'], how='right').rename(columns={'SOP_QTY': name_sop})
         part_a.fillna(value=0, inplace=True)
         part_a[f'VS {name_sop}'] = part_a['shipped_plus_working'] - part_a[name_sop]
-        part_a = part_a[['CTGY', name_sop, 'shipped_plus_working', f'VS {name_sop}']]
+        part_a = part_a[['CUSTOMER', 'LINE', name_sop, 'shipped_plus_working', f'VS {name_sop}']]
 
+    real_columns = [col for col in part_a.columns if col not in ['CUSTOMER','LINE']]
+    for col in real_columns:
+        part_a[col] = part_a[col].apply(lambda x: round_up(x))
     part_a.to_excel('OE_Update_LINE_{}.xlsx'.format(datetime.strftime(datetime.now(), '%Y-%m-%d')), index=False)
 
 
-# prep mails out
 def line_mail():
     # prep html file for category
     def color_negative_red(value):
