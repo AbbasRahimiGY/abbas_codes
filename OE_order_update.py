@@ -6,7 +6,7 @@ import os
 
 os.chdir(r'T:\Marketing\GBA-Share\BA Portal Files\OE_Forecast')
 # Make a connection
-link = ('DSN=EDWTDPRD;UID=AA68383;PWD=baradarkhobvaghashang1364')
+link = ('DSN=EDWTDPRD;UID=AA68383;PWD=ilivein339westberry')
 pyodbc.pooling = False
 
 
@@ -129,7 +129,10 @@ def prep_order_data(df):
         return _
 
     df_update = df.copy()
-    _ = df.pivot_table('PRI_AND_CURR_MTH_IN_PROC_QTY', index='SNAP_DT', columns='CUSTOMER',
+    df_update['PLN_DEL_DT'] = df_update['PLN_DEL_DT'].astype('datetime64')
+    df_update['SNAP_DT'] = df_update['SNAP_DT'].astype('datetime64')
+
+    _ = df_update.pivot_table('PRI_AND_CURR_MTH_IN_PROC_QTY', index='SNAP_DT', columns='CUSTOMER',
                        aggfunc='sum', dropna=False, fill_value=0).resample('Y').sum()
 
     active_customer = [col for col in _.columns if _['2019':][col].sum() > 100]
@@ -164,8 +167,10 @@ def prep_order_data(df):
     df_update.to_pickle('historical_orders\historical_order_Rachael_filled_missing.pickle')
 
 
-df = pd.read_pickle('historical_orders\historical_order_Rachael.pickle')
+hist_orders = pd.read_pickle(r'historical_orders\new_historical_order.pickle')
+df = hist_orders.copy()
 df['PLN_DEL_DT'] = df['PLN_DEL_DT'].astype('datetime64')
+df['SNAP_DT'] = df['SNAP_DT'].astype('datetime64')
 last_snap = datetime.strftime(df['SNAP_DT'].tail(1).tolist()[0] + timedelta(days=1), "%Y-%m-%d")
 current_date = datetime.strftime(datetime.today() - timedelta(days=1), "%Y-%m-%d")
 
@@ -174,12 +179,12 @@ dates = pd.date_range(start=last_snap, end=current_date, freq='d')
 if len(dates) > 0:
     orders = pd.DataFrame()
     for i in range(len(dates)):
-        order = order_query_rachael(dates[i])
-        order['SNAP_DT'] = pd.to_datetime(order['SNAP_DT'], errors='coerce')
-        orders = orders.append(order, ignore_index=True)
-    df = df.append(orders)
-    df.to_pickle('historical_orders\historical_order_Rachael.pickle')
-    prep_order_data(df) # update the orders with additional info and filled missing dates
+        day_order = order_query_rachael(dates[i])
+        #order['SNAP_DT'] = pd.to_datetime(order['SNAP_DT'], errors='coerce')
+        orders = orders.append(day_order, ignore_index=True)
+    hist_orders = hist_orders.append(orders)
+    hist_orders.to_pickle(r'historical_orders\new_historical_order.pickle')
+    prep_order_data(hist_orders) # update the orders with additional info and filled missing dates
 
 
 
