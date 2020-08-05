@@ -97,7 +97,7 @@ def direct_shipment_query():
     df = df.resample('D').sum()
     df1 = df.resample('y').sum()
     active_customers = [col for col in df1.columns if df1['2019':][col].sum() > 100]
-    print('active customer are={}'.format(active_customers))
+    # print('active customer are={}'.format(active_customers))
     df = df[active_customers]
     df = df['2014':]
     df[df < 0] = 0
@@ -175,7 +175,7 @@ def read_covid():
 def read_LV():
     active_cust = ['Chrysler', 'Ford', 'GM', 'HYUNDAI', 'Honda', 'Nissan', 'OE Auto Gen Cust', 'OE Mobile Home',
                    'OE Non Auto Gen Cust', 'SIA', 'Tesla', 'Toyota', 'Tredit', 'VW']
-    df = pd.read_excel(r'202006NAPAK.xls', header=8, sheet_name='Mth-Qtr-CY')
+    df = pd.read_excel(r'202007NAPAK.xls', header=8, sheet_name='Mth-Qtr-CY')
     df.columns = df.columns.str.strip().str.upper().str.replace('VP: ', '').str.replace(' ', '_'). \
         str.replace('-', '_').str.replace('___', '_')
     mon_name = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]

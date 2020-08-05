@@ -676,8 +676,8 @@ if __name__ == '__main__':
     scale_list = ['y']
 
     max_terms = len(exogenous_features)
-    cutoff = datetime.strftime(datetime.today() - timedelta(days=1), "%Y-%m-%d")  # where to cutoff data
-    test = datetime.strftime(datetime.today() - timedelta(days=0),
+    cutoff = datetime.strftime(datetime.today() - timedelta(days=2), "%Y-%m-%d")  # where to cutoff data
+    test = datetime.strftime(datetime.today() - timedelta(days=1),
                              "%Y-%m-%d")  # where we sample from snap date for all horizons
     # find the horizon to search
     horizon = calendar.monthrange(datetime.strptime(test, "%Y-%m-%d").year,

@@ -32,8 +32,8 @@ def order_total_query():
                   SUM(ZEROIFNULL(O1.BPI_COMMIT)) AS PRI_AND_CURR_MTH_COMMIT_QTY,
                   SUM(             ZEROIFNULL(D1.PRI_AND_CURR_MTH_INPROC_QTY)        ) AS PRI_AND_CURR_MTH_IN_PROC_QTY,
                   PRI_AND_CURR_MTH_COMMIT_QTY+PRI_AND_CURR_MTH_IN_PROC_QTY AS WORKING,
-                  SUM(D1.DELIV_QTY) AS SHIP_QTY,
-                  SHIP_QTY +WORKING AS shipped_plus_working
+                  SUM(D1.DELIV_QTY) AS SHIP_QTY
+                 -- SHIP_QTY + WORKING AS shipped_plus_working
 
             FROM
                           (
@@ -124,6 +124,12 @@ def order_total_query():
 
     with pyodbc.connect(link, autocommit=True) as connect:
         df = pd.read_sql(query, connect)
+    df.fillna(value=0, inplace=True)
+    columns = ['PRI_AND_CURR_MTH_COMMIT_QTY', 'PRI_AND_CURR_MTH_IN_PROC_QTY', 'SHIP_QTY', 'WORKING']
+    for col in columns:
+        df[col] = df[col].astype('int32')
+
+    df['shipped_plus_working'] = df['SHIP_QTY'] + df['WORKING']
     return df  # old model #
 
 

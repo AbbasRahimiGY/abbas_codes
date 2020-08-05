@@ -1,15 +1,18 @@
 import calendar
+from zipfile import ZipFile
+
 import pandas as pd
 from datetime import datetime, timedelta
 import pyodbc
 import numpy as np
 import os, warnings
 import matplotlib.pyplot as plt
+import wget
 from sklearn import preprocessing
 from sklearn.decomposition import PCA
 from joblib import Parallel, delayed
 import concurrent.futures
-from models import prophetCV, poly_linearCV, mars, model_stack, cbCV, xgbCV,xgb,poly_linear,cb
+from models import prophetCV, poly_linearCV, mars, model_stack, cbCV, xgbCV, xgb, poly_linear, cb
 
 os.environ['NUMEXPR_NUM_THREADS'] = '8'
 warnings.simplefilter('ignore')
@@ -18,7 +21,7 @@ plt.style.use('fivethirtyeight')
 warnings.filterwarnings('ignore')
 os.chdir(r'T:\Marketing\GBA-Share\BA Portal Files\OE_Forecast')
 # Make a connection
-link = ('DSN=EDWTDPRD;UID=AA68383;PWD=baradarkhobvaghashang1364')
+link = ('DSN=EDWTDPRD;UID=AA68383;PWD=ilivein339westberry')
 pyodbc.pooling = False
 
 
@@ -139,9 +142,11 @@ def plan_query(link):
     with pyodbc.connect(link, autocommit=True) as connect:
         df = pd.read_sql(query, connect)
     df['DATE'] = pd.to_datetime(df['DATE'])
+    name_sop = df['FORC_TYP_DESC'].tail(1).values.tolist()[0]  # use the current month pln as header name
     DATE = datetime.now() - timedelta(days=1)
     df = df[(df.DATE.dt.month == DATE.month) & (df.DATE.dt.year == DATE.year)]
     df['SOP_QTY'] = df['SOP_QTY'].astype(int)
+    df.rename(columns={'SOP_QTY': name_sop}, inplace=True)
     return df
 
 
@@ -182,6 +187,39 @@ def prep_order_data(active_CUSTOMER):
     return df
 
 
+def read_covid():
+    url = "https://ihmecovid19storage.blob.core.windows.net/latest/ihme-covid19.zip"
+    wget.download(url, 'ihme-covid19.zip')
+    with ZipFile('ihme-covid19.zip', 'r') as zipObj:
+        # Get a list of all archived file names from the zip
+        listOfFileNames = zipObj.namelist()
+        # Iterate over the file names
+        for fileName in listOfFileNames:
+            # Check filename endswith csv
+            if 'Reference' in fileName:
+                # Extract a single file from zip
+                _df = pd.read_csv(zipObj.extract(fileName, 'temp_csv'))
+    _df = _df[_df.location_name == 'United States of America'][
+        ['date', 'admis_mean', 'admis_lower', 'admis_upper']].rename(columns={'date': 'time'})
+    _df[['time']] = _df[['time']].astype('Datetime64')
+    start = datetime.strftime(_df['time'].iloc[0] - timedelta(days=1), '%Y-%m-%d')
+    end = datetime.strftime(_df['time'].iloc[-1] + timedelta(days=1), '%Y-%m-%d')
+    for col in ['admis_mean', 'admis_lower', 'admis_upper']:
+        # scale between 0 and 1
+        st_scaler = preprocessing.MinMaxScaler()  #
+        _df.loc[:, col] = st_scaler.fit_transform(_df.loc[:, col].values.reshape(-1, 1))
+
+    before = pd.DataFrame({'time': pd.date_range('2014-01-01', start, freq='d'),
+                           'admis_mean': 0, 'admis_lower': 0, 'admis_upper': 0})
+
+    after = pd.DataFrame({'time': pd.date_range(end, '2020-12-31', freq='d'),
+                          'admis_mean': 0, 'admis_lower': 0, 'admis_upper': 0})
+
+    _df = pd.concat([before, _df, after])
+    os.remove('ihme-covid19.zip')
+    return _df
+
+
 def prep_data(data, holiday, scale_list=None, scale_type='no_scale', pca_dim=0):
     '''
     current columns
@@ -199,11 +237,13 @@ def prep_data(data, holiday, scale_list=None, scale_type='no_scale', pca_dim=0):
     :param holiday:
     :return:
     '''
+
     df = data.copy()
     if df.index.dtype != 'Datetime64':
         df = df.set_index('PLN_DEL_DT')
     # some shipped qty are negative so we set them to zero
-    df.loc[df.SHIP_QTY < 0, 'SHIP_QTY'] = 0
+    df.loc[df.SHIP_QTY < 0,
+           'SHIP_QTY'] = 0
     df = df. \
         rename(columns={'PRI_AND_CURR_MTH_COMMIT_QTY': 'CON', 'PRI_AND_CURR_MTH_IN_PROC_QTY': 'IP'})
     df['day'] = df.index.day
@@ -226,9 +266,24 @@ def prep_data(data, holiday, scale_list=None, scale_type='no_scale', pca_dim=0):
     df['past_seven'] = df.groupby(['CUSTOMER'])['SHIP_QTY'].rolling(window=7).mean().values
     df['past_twentyeight'] = df.groupby(['CUSTOMER'])['SHIP_QTY'].rolling(window=28).mean().values
     df.dropna(how='any', inplace=True)
+
+    # list of regressors which are required to be scaled
+    list_of_scale = ['CON', 'IP', 'past_seven', 'past_twentyeight', 'yday_gain', 'past_two',
+                    'final_week_ip', 'final_week_con','tot_ship','working','working_shipped',
+                     'straight_line','tot_ship_time_day']
+    for col in list_of_scale:
+        # scale between 0 and 1
+        st_scaler = preprocessing.MinMaxScaler()  #
+        df.loc[:, col] = st_scaler.fit_transform(df.loc[:, col].values.reshape(-1, 1))
+
+    df.reset_index(inplace=True)
+    covid = read_covid()
+    covid.loc[covid.time >= datetime.strptime('2020-06-01', '%Y-%m-%d'), 'admis_mean'] = 0
+    covid = covid[['time','admis_mean']].rename(columns={'admis_mean':'covid'})
+    df = pd.merge(df,covid,left_on=['PLN_DEL_DT'], right_on=['time'], how='left').drop(columns='time')
+    #  print(df.loc[df.PLN_DEL_DT == datetime.strptime('2020-05-31', '%Y-%m-%d'), 'covid'])
     # add holidays
     holiday_nd = holiday.drop_duplicates()
-    df.reset_index(inplace=True)
     df = pd.merge(df, holiday_nd, left_on=['PLN_DEL_DT'], right_on=['ds'], how='left').drop(columns=['index', 'ds'])
     df['holiday'] = df['holiday'].fillna(value='regular')
     df = pd.concat([df, pd.get_dummies(df['holiday'])], axis=1). \
@@ -286,8 +341,9 @@ def data_resampling(df, df_shipment, current, link):
     :param df:
     :return:
     '''
-    def prep_for_tableau(df_sample,df_shipment):
-        ship,dif = df_shipment.rename(columns={'SNAP_DT':'Date'}).copy(),df_sample.copy()
+
+    def prep_for_tableau(df_sample, df_shipment):
+        ship, dif = df_shipment.rename(columns={'SNAP_DT': 'Date'}).copy(), df_sample.copy()
         ship[['Date']] = ship[['Date']].astype('Datetime64')
         dif[['Date']] = dif[['Date']].astype('Datetime64')
         df_combo = pd.concat([ship, dif]).fillna(0)[
@@ -297,20 +353,23 @@ def data_resampling(df, df_shipment, current, link):
         df_combo.drop(columns='SHIP_QTY', inplace=True)
         df_combo.to_excel(r'\\AKRTABLEAUPNA01\Americas_Market_Analytics$\COVID\daily__order_forecast.xlsx')
 
-    #current_month = datetime.strftime(datetime.strptime(current, '%Y-%m-%d'), '%Y-%m')
+    # current_month = datetime.strftime(datetime.strptime(current, '%Y-%m-%d'), '%Y-%m')
     df.reset_index(inplace=True)
     df.to_excel('daily_forecast_{}.xlsx'.format(current))
     model_names = [col for col in df.columns if col not in ['Date', 'CUSTOMER']]
     df.Date = df.Date.ffill()
     df['mean'] = df.loc[:, model_names].mean(axis=1).astype('int')
     df['std'] = df.loc[:, model_names].std(axis=1).astype('int')
-    for index, row in df.iterrows():
+    df['forecast_mean'] = df['mean']
+    df['forecast_low'] = df['mean'] - 1.96*df['std']/np.sqrt(len(model_names))
+    df['forecast_high'] = df['mean'] + 1.96 * df['std'] / np.sqrt(len(model_names))
+    '''for index, row in df.iterrows():
         samples = np.random.normal(loc=row['mean'], scale=row['std'], size=1000)
         df.loc[index, 'forecast_mean'] = round(samples.mean(), 0)
         df.loc[index, 'forecast_low'] = np.where(round(np.percentile(samples, 20), 0) > 0,
                                                  round(np.percentile(samples, 20), 0), 0)
         df.loc[index, 'forecast_high'] = np.where(round(np.percentile(samples, 80), 0) > 0,
-                                                  round(np.percentile(samples, 80), 0), 0)
+                                                  round(np.percentile(samples, 80), 0), 0)'''
     df.drop(columns=['mean', 'std'], inplace=True)
     prep_for_tableau(df, df_shipment)
     # now merge with current month shipment
@@ -327,7 +386,7 @@ def data_resampling(df, df_shipment, current, link):
     # now lets add S&OP to our forecast
     plan = plan_query(link)
     pd.merge(df, plan, on=['CUSTOMER']).drop(columns=['DATE', 'FORC_TYP_DESC']).to_excel(
-        'monthly_forecast_asof_{}.xlsx'.format(current))
+        r'\\AKRTABLEAUPNA01\Americas_Market_Analytics$\COVID\monthly_OE_consensus_forecast.xlsx')
 
 
 if __name__ == '__main__':
@@ -335,19 +394,20 @@ if __name__ == '__main__':
     holidays = events_holidays_update(link)
     shipment = direct_shipment_query(link)
     active_CUSTOMER = shipment.CUSTOMER.unique().tolist()
-    orders = pd.read_pickle('historical_orders\historical_order_Rachael_filled_missing.pickle')
+    orders = pd.read_pickle(r'historical_orders\historical_order_Rachael_filled_missing.pickle')
     type = 'parallel'
     pca_dim = 0
-    scale_type = 'None'#'MinMax'
+    scale_type = None  # 'MinMax'
     # -----------------------
-    exogenous_features = ['CON', 'IP', 'past_seven', 'past_twentyeight','yday_gain', 'past_two',
+    exogenous_features = ['CON', 'IP', 'past_seven', 'past_twentyeight', 'yday_gain', 'past_two',
                           'final_week', 'final_week_ip', 'final_week_con',
                           'Christmas', 'Christmas Eve', 'Easter',
                           'Independence Day', 'Labor Day', 'Mday', 'New Year Eve', 'NY',
-                          'Thanksgiving', 'Apr', 'Aug', 'Feb', 'Jan', 'Jul', 'Jun', 'Mar', 'May','Nov', 'Oct', 'Sep',
-                           #'Fri', 'Mon', 'Sat', 'Thu', 'Tue', 'Wed'
+                          'Thanksgiving', 'Apr', 'Aug', 'Feb', 'Jan', 'Jul', 'Jun', 'Mar', 'May', 'Nov', 'Oct', 'Sep',
+                          # 'Fri', 'Mon', 'Sat', 'Thu', 'Tue', 'Wed'
                           ]
-    cutoff_date = datetime.strftime(datetime.today() - timedelta(days=2), "%Y-%m-%d")  # where to cutoff data
+    exogenous_features = ['CON', 'IP']
+    cutoff_date = datetime.strftime(datetime.today() - timedelta(days=1), "%Y-%m-%d")  # where to cutoff data
     test_date = datetime.strftime(datetime.today() - timedelta(days=1),
                                   "%Y-%m-%d")  # where we sample from snap date for all horizons
     # find the horizon to search
@@ -355,7 +415,7 @@ if __name__ == '__main__':
                                   datetime.strptime(test_date, "%Y-%m-%d").month)[1] - \
               datetime.strptime(test_date, "%Y-%m-%d").day + 1
     # temp horizon
-    horizon = np.int((pd.to_datetime('2020-04-30') - pd.to_datetime(test_date)) / np.timedelta64(1, 'D'))
+    # horizon = np.int((pd.to_datetime('2020-08-03') - pd.to_datetime(test_date)) / np.timedelta64(1, 'D'))
     result = []
     import time
 
@@ -365,8 +425,9 @@ if __name__ == '__main__':
         lead_order = orders[(orders.PLN_DEL_DT - orders.SNAP_DT).dt.days == lead].copy()
         lead_order = lead_order.merge(shipment, on=['SNAP_DT', 'CUSTOMER'], how='left').fillna(0)
         updated_features, lead_order = prep_data(lead_order, holidays, exogenous_features, scale_type, pca_dim)
+
         if pca_dim > 0:
-            updated_features = [col for col in updated_features if col not in ['IP', 'CON'] ]
+            updated_features = [col for col in updated_features if col not in ['IP', 'CON']]
 
         if type == 'parallel':
             dict_reg = {'XgBoost': xgb,
@@ -390,7 +451,6 @@ if __name__ == '__main__':
                 tasks = (delayed(reg)(df_train, df_valid, updated_features) for df_train, df_valid in
                          zip(series_train, series_valid))
                 forecast = executor(tasks)
-
 
                 day_forecast = pd.DataFrame({'CUSTOMER': lead_order.CUSTOMER.unique().tolist(),
                                              'Forecast': forecast, 'Date': lead_date, 'model': key})
